@@ -38,6 +38,8 @@ func New(logger *slog.Logger, store Store) *Handler {
 	h.mux.HandleFunc("GET /api/v1/lines", h.lines)
 	h.mux.HandleFunc("GET /api/v1/lines/{line_id}", h.lineDetail)
 	h.mux.HandleFunc("GET /api/v1/lines/{line_id}/vehicles", h.lineVehicles)
+	h.mux.HandleFunc("GET /api/v1/realtime/routes", h.realtimeRoutes)
+	h.mux.HandleFunc("GET /api/v1/realtime/routes/{route_id}/vehicles", h.realtimeRouteVehicles)
 	h.mux.HandleFunc("GET /api/v1/stations/{stop_id}", h.stationArrivals)
 	h.mux.HandleFunc("GET /api/v1/stations/{stop_id}/next-arrival", h.stationNextArrival)
 	h.mux.HandleFunc("GET /api/v1/metrics", h.globalMetrics)
@@ -72,6 +74,8 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 
 type lineResponse struct {
 	ID             string  `json:"id"`
+	ServiceType    string  `json:"service_type"`
+	Source         string  `json:"source"`
 	HeadwayAvgSec  float64 `json:"headway_avg_seconds"`
 	ActiveVehicles int     `json:"active_vehicles"`
 }
@@ -86,6 +90,8 @@ func (h *Handler) lines(w http.ResponseWriter, r *http.Request) {
 		veh := metrics.VehiclesForLine(line, positions)
 		resp = append(resp, lineResponse{
 			ID:             line,
+			ServiceType:    "metro",
+			Source:         "scheduled",
 			HeadwayAvgSec:  hw.AvgSeconds,
 			ActiveVehicles: len(veh),
 		})
@@ -94,11 +100,13 @@ func (h *Handler) lines(w http.ResponseWriter, r *http.Request) {
 }
 
 type lineDetailResponse struct {
-	ID             string  `json:"id"`
-	HeadwayAvgSec  float64 `json:"headway_avg_seconds"`
-	HeadwayMinSec  float64 `json:"headway_min_seconds"`
-	HeadwayMaxSec  float64 `json:"headway_max_seconds"`
-	ActiveVehicles int     `json:"active_vehicles"`
+	ID             string    `json:"id"`
+	ServiceType    string    `json:"service_type"`
+	Source         string    `json:"source"`
+	HeadwayAvgSec  float64   `json:"headway_avg_seconds"`
+	HeadwayMinSec  float64   `json:"headway_min_seconds"`
+	HeadwayMaxSec  float64   `json:"headway_max_seconds"`
+	ActiveVehicles int       `json:"active_vehicles"`
 	LastUpdated    time.Time `json:"last_updated"`
 }
 
@@ -115,6 +123,8 @@ func (h *Handler) lineDetail(w http.ResponseWriter, r *http.Request) {
 	veh := metrics.VehiclesForLine(lineID, positions)
 	writeJSON(w, http.StatusOK, lineDetailResponse{
 		ID:             lineID,
+		ServiceType:    "metro",
+		Source:         "scheduled",
 		HeadwayAvgSec:  hw.AvgSeconds,
 		HeadwayMinSec:  hw.MinSeconds,
 		HeadwayMaxSec:  hw.MaxSeconds,
@@ -124,18 +134,21 @@ func (h *Handler) lineDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 type vehicleJSON struct {
-	ID              string    `json:"id"`
-	Latitude        *float64  `json:"latitude"`
-	Longitude       *float64  `json:"longitude"`
-	CurrentStopID   string    `json:"current_stop_id"`
-	Bearing         float32   `json:"bearing"`
-	SpeedKmh        float32   `json:"speed_kmh"`
-	LastUpdated     time.Time `json:"last_updated"`
-	PositionAvail   bool      `json:"position_available"`
+	ID            string    `json:"id"`
+	Latitude      *float64  `json:"latitude"`
+	Longitude     *float64  `json:"longitude"`
+	CurrentStopID string    `json:"current_stop_id"`
+	Bearing       float32   `json:"bearing"`
+	SpeedKmh      float32   `json:"speed_kmh"`
+	LastUpdated   time.Time `json:"last_updated"`
+	PositionAvail bool      `json:"position_available"`
 }
 
 type vehiclesResponse struct {
 	LineID       string        `json:"line_id"`
+	RouteID      string        `json:"route_id,omitempty"`
+	ServiceType  string        `json:"service_type"`
+	Source       string        `json:"source"`
 	VehicleCount int           `json:"vehicle_count"`
 	Vehicles     []vehicleJSON `json:"vehicles"`
 	DataAgeSec   float64       `json:"data_age_seconds"`
@@ -180,6 +193,74 @@ func (h *Handler) lineVehicles(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, vehiclesResponse{
 		LineID:       lineID,
+		ServiceType:  "metro",
+		Source:       "scheduled",
+		VehicleCount: len(vjs),
+		Vehicles:     vjs,
+		DataAgeSec:   age,
+	})
+}
+
+type realtimeRouteResponse struct {
+	ID             string `json:"id"`
+	ServiceType    string `json:"service_type"`
+	Source         string `json:"source"`
+	ActiveVehicles int    `json:"active_vehicles"`
+}
+
+func (h *Handler) realtimeRoutes(w http.ResponseWriter, r *http.Request) {
+	updates := h.store.GetTripUpdates()
+	positions := h.store.GetVehiclePositions()
+
+	routes := metrics.RealtimeRoutes(updates, positions)
+	resp := make([]realtimeRouteResponse, 0, len(routes))
+	for _, routeID := range routes {
+		resp = append(resp, realtimeRouteResponse{
+			ID:             routeID,
+			ServiceType:    "surface",
+			Source:         "realtime",
+			ActiveVehicles: len(metrics.RealtimeVehiclesForRoute(routeID, positions)),
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) realtimeRouteVehicles(w http.ResponseWriter, r *http.Request) {
+	routeID := r.PathValue("route_id")
+	positions := h.store.GetVehiclePositions()
+	vehicles := metrics.RealtimeVehiclesForRoute(routeID, positions)
+
+	var vjs []vehicleJSON
+	for _, v := range vehicles {
+		vj := vehicleJSON{
+			ID:            v.ID,
+			CurrentStopID: v.CurrentStopID,
+			Bearing:       v.Bearing,
+			SpeedKmh:      v.Speed,
+			LastUpdated:   v.Timestamp,
+			PositionAvail: v.PositionAvail,
+		}
+		if v.PositionAvail {
+			lat := v.Latitude
+			lon := v.Longitude
+			vj.Latitude = &lat
+			vj.Longitude = &lon
+		}
+		vjs = append(vjs, vj)
+	}
+	if vjs == nil {
+		vjs = []vehicleJSON{}
+	}
+
+	ft := h.store.LastFetchTime()
+	var age float64
+	if !ft.IsZero() {
+		age = time.Since(ft).Seconds()
+	}
+	writeJSON(w, http.StatusOK, vehiclesResponse{
+		RouteID:      routeID,
+		ServiceType:  "surface",
+		Source:       "realtime",
 		VehicleCount: len(vjs),
 		Vehicles:     vjs,
 		DataAgeSec:   age,
@@ -216,15 +297,15 @@ func (h *Handler) stationArrivals(w http.ResponseWriter, r *http.Request) {
 }
 
 type nextArrivalResponse struct {
-	StopID              string    `json:"stop_id"`
-	LineID              string    `json:"line_id"`
-	TripID              string    `json:"trip_id"`
-	ArrivalTime         time.Time `json:"arrival_time"`
-	TimeToArrivalSec    int64     `json:"time_to_arrival_seconds"`
-	TimeToArrivalHuman  string    `json:"time_to_arrival_human"`
-	DelaySeconds        int32     `json:"delay_seconds"`
-	IsRealtime          bool      `json:"is_realtime"`
-	DataAgeSec          float64   `json:"data_age_seconds"`
+	StopID             string    `json:"stop_id"`
+	LineID             string    `json:"line_id"`
+	TripID             string    `json:"trip_id"`
+	ArrivalTime        time.Time `json:"arrival_time"`
+	TimeToArrivalSec   int64     `json:"time_to_arrival_seconds"`
+	TimeToArrivalHuman string    `json:"time_to_arrival_human"`
+	DelaySeconds       int32     `json:"delay_seconds"`
+	IsRealtime         bool      `json:"is_realtime"`
+	DataAgeSec         float64   `json:"data_age_seconds"`
 }
 
 func (h *Handler) stationNextArrival(w http.ResponseWriter, r *http.Request) {
@@ -259,10 +340,10 @@ func (h *Handler) stationNextArrival(w http.ResponseWriter, r *http.Request) {
 }
 
 type globalMetricsResponse struct {
-	TotalActiveVehicles int                    `json:"total_active_vehicles"`
-	HeadwayByLine       map[string]float64     `json:"headway_avg_by_line"`
-	LastPollTime        time.Time              `json:"last_poll_time"`
-	FeedAgeSec          float64                `json:"feed_age_seconds"`
+	TotalActiveVehicles int                `json:"total_active_vehicles"`
+	HeadwayByLine       map[string]float64 `json:"headway_avg_by_line"`
+	LastPollTime        time.Time          `json:"last_poll_time"`
+	FeedAgeSec          float64            `json:"feed_age_seconds"`
 }
 
 func (h *Handler) globalMetrics(w http.ResponseWriter, r *http.Request) {
@@ -320,4 +401,3 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
 }
-

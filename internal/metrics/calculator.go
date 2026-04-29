@@ -127,6 +127,49 @@ func VehiclesForLine(lineID string, positions []domain.VehiclePosition) []domain
 	return vehicles
 }
 
+func RealtimeRoutes(updates []domain.TripUpdate, positions []domain.VehiclePosition) []string {
+	seen := map[string]bool{}
+	for _, tu := range updates {
+		if tu.Source == "realtime" && tu.ServiceType != "metro" && tu.RouteID != "" {
+			seen[tu.RouteID] = true
+		}
+	}
+	for _, vp := range positions {
+		if vp.Source == "realtime" && vp.ServiceType != "metro" && vp.RouteID != "" {
+			seen[vp.RouteID] = true
+		}
+	}
+
+	routes := make([]string, 0, len(seen))
+	for routeID := range seen {
+		routes = append(routes, routeID)
+	}
+	sort.Strings(routes)
+	return routes
+}
+
+func RealtimeVehiclesForRoute(routeID string, positions []domain.VehiclePosition) []domain.Vehicle {
+	var vehicles []domain.Vehicle
+	for _, vp := range positions {
+		if vp.RouteID != routeID || vp.Source != "realtime" || vp.ServiceType == "metro" {
+			continue
+		}
+		vehicles = append(vehicles, domain.Vehicle{
+			ID:             vp.VehicleID,
+			LineID:         routeID,
+			Latitude:       vp.Latitude,
+			Longitude:      vp.Longitude,
+			PositionAvail:  vp.PositionAvail,
+			CurrentStopID:  vp.CurrentStopID,
+			CurrentStopSeq: vp.CurrentStopSeq,
+			Bearing:        vp.Bearing,
+			Speed:          vp.Speed,
+			Timestamp:      vp.Timestamp,
+		})
+	}
+	return vehicles
+}
+
 // HeadwayForLine computes headway across all stops for all trips of a given line.
 func HeadwayForLine(lineID string, updates []domain.TripUpdate) domain.Headway {
 	// Collect all unique stops for this line

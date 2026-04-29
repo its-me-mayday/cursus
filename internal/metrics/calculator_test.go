@@ -259,6 +259,35 @@ func TestVehiclesForLine_PositionFields(t *testing.T) {
 	}
 }
 
+func TestRealtimeRoutes_ExcludesMetroAndSorts(t *testing.T) {
+	updates := []domain.TripUpdate{
+		{RouteID: "64", ServiceType: "surface", Source: "realtime"},
+		{RouteID: "MA", ServiceType: "metro", Source: "realtime"},
+		{RouteID: "8", ServiceType: "surface", Source: "realtime"},
+	}
+	positions := []domain.VehiclePosition{
+		{RouteID: "64", ServiceType: "surface", Source: "realtime"},
+		{RouteID: "MB", ServiceType: "metro", Source: "realtime"},
+	}
+	routes := RealtimeRoutes(updates, positions)
+	if len(routes) != 2 || routes[0] != "64" || routes[1] != "8" {
+		t.Errorf("routes = %v, want [64 8]", routes)
+	}
+}
+
+func TestRealtimeVehiclesForRoute_FiltersSurfaceRealtime(t *testing.T) {
+	positions := []domain.VehiclePosition{
+		{VehicleID: "V1", RouteID: "64", ServiceType: "surface", Source: "realtime"},
+		{VehicleID: "V2", RouteID: "64", ServiceType: "metro", Source: "realtime"},
+		{VehicleID: "V3", RouteID: "64", ServiceType: "surface", Source: "scheduled"},
+		{VehicleID: "V4", RouteID: "8", ServiceType: "surface", Source: "realtime"},
+	}
+	vehicles := RealtimeVehiclesForRoute("64", positions)
+	if len(vehicles) != 1 || vehicles[0].ID != "V1" {
+		t.Errorf("vehicles = %+v, want V1 only", vehicles)
+	}
+}
+
 // --- HeadwayForLine ---
 
 func TestHeadwayForLine_NoUpdates(t *testing.T) {

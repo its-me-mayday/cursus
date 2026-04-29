@@ -70,8 +70,11 @@ func TestTranslateTripUpdates_UnknownRouteID(t *testing.T) {
 	tr := NewGTFSTranslator(testLogger(), testRouteIDs)
 	msg := feedMsg(tripUpdateEntity("e1", "UNKNOWN", "trip1", nil))
 	result := tr.TranslateTripUpdates(msg)
-	if len(result) != 0 {
-		t.Errorf("expected 0 results for unknown route, got %d", len(result))
+	if len(result) != 1 {
+		t.Fatalf("expected surface route result, got %d", len(result))
+	}
+	if result[0].RouteID != "UNKNOWN" || result[0].ServiceType != "surface" || result[0].Source != "realtime" {
+		t.Errorf("unexpected translated route: %+v", result[0])
 	}
 }
 
@@ -96,6 +99,9 @@ func TestTranslateTripUpdates_ValidMA(t *testing.T) {
 	tu := result[0]
 	if tu.RouteID != "MA" {
 		t.Errorf("route = %q, want MA", tu.RouteID)
+	}
+	if tu.ServiceType != "metro" || tu.Source != "realtime" {
+		t.Errorf("service/source = %q/%q, want metro/realtime", tu.ServiceType, tu.Source)
 	}
 	if tu.TripID != "trip-123" {
 		t.Errorf("trip_id = %q, want trip-123", tu.TripID)
@@ -243,8 +249,11 @@ func TestTranslateVehiclePositions_UnknownRouteID(t *testing.T) {
 	tr := NewGTFSTranslator(testLogger(), testRouteIDs)
 	msg := feedMsg(vehicleEntity("e1", "UNKNOWN", "v1", "trip1", true))
 	result := tr.TranslateVehiclePositions(msg)
-	if len(result) != 0 {
-		t.Errorf("expected 0, got %d", len(result))
+	if len(result) != 1 {
+		t.Fatalf("expected surface route result, got %d", len(result))
+	}
+	if result[0].RouteID != "UNKNOWN" || result[0].ServiceType != "surface" || result[0].Source != "realtime" {
+		t.Errorf("unexpected translated vehicle: %+v", result[0])
 	}
 }
 
@@ -264,6 +273,9 @@ func TestTranslateVehiclePositions_WithGPS(t *testing.T) {
 	}
 	if vp.RouteID != "MA" {
 		t.Errorf("route = %q, want MA", vp.RouteID)
+	}
+	if vp.ServiceType != "metro" || vp.Source != "realtime" {
+		t.Errorf("service/source = %q/%q, want metro/realtime", vp.ServiceType, vp.Source)
 	}
 	if vp.VehicleID != "v42" {
 		t.Errorf("vehicle_id = %q, want v42", vp.VehicleID)
@@ -478,7 +490,7 @@ func TestTranslateTripUpdates_ArrivalTimeNilTime(t *testing.T) {
 	tr := NewGTFSTranslator(testLogger(), testRouteIDs)
 	stus := []*gtfsrt.TripUpdate_StopTimeUpdate{
 		{
-			StopId:   ptr("STOP1"),
+			StopId: ptr("STOP1"),
 			Arrival: &gtfsrt.TripUpdate_StopTimeEvent{
 				// Time is nil but Delay is set
 				Delay: ptr(int32(30)),

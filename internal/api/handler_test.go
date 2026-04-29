@@ -224,6 +224,57 @@ func TestLineVehicles_ZeroFetchTime(t *testing.T) {
 	}
 }
 
+func TestRealtimeRoutes_ReturnsSurfaceRoutes(t *testing.T) {
+	store := &mockStore{
+		tripUpdates: []domain.TripUpdate{
+			{RouteID: "64", ServiceType: "surface", Source: "realtime"},
+			{RouteID: "MA", ServiceType: "metro", Source: "realtime"},
+		},
+		vehiclePositions: []domain.VehiclePosition{
+			{VehicleID: "V1", RouteID: "64", ServiceType: "surface", Source: "realtime"},
+		},
+	}
+	h := newHandler(store)
+	w := get(h, "/api/v1/realtime/routes")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	var resp []realtimeRouteResponse
+	decodeJSON(t, w.Body.String(), &resp)
+	if len(resp) != 1 {
+		t.Fatalf("expected 1 realtime route, got %d", len(resp))
+	}
+	if resp[0].ID != "64" || resp[0].Source != "realtime" || resp[0].ServiceType != "surface" {
+		t.Errorf("unexpected route response: %+v", resp[0])
+	}
+	if resp[0].ActiveVehicles != 1 {
+		t.Errorf("active vehicles = %d, want 1", resp[0].ActiveVehicles)
+	}
+}
+
+func TestRealtimeRouteVehicles_ReturnsVehicles(t *testing.T) {
+	store := &mockStore{
+		vehiclePositions: []domain.VehiclePosition{
+			{VehicleID: "V1", RouteID: "8", ServiceType: "surface", Source: "realtime", Latitude: 41.9, Longitude: 12.5, PositionAvail: true},
+			{VehicleID: "V2", RouteID: "MA", ServiceType: "metro", Source: "realtime", PositionAvail: true},
+		},
+		lastFetchTime: time.Now().Add(-2 * time.Second),
+	}
+	h := newHandler(store)
+	w := get(h, "/api/v1/realtime/routes/8/vehicles")
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	var resp vehiclesResponse
+	decodeJSON(t, w.Body.String(), &resp)
+	if resp.RouteID != "8" || resp.Source != "realtime" || resp.ServiceType != "surface" {
+		t.Errorf("unexpected vehicles response: %+v", resp)
+	}
+	if resp.VehicleCount != 1 || resp.Vehicles[0].ID != "V1" {
+		t.Errorf("vehicles = %+v, want V1 only", resp.Vehicles)
+	}
+}
+
 // --- /api/v1/stations/{stop_id} ---
 
 func TestStationArrivals_Sorted(t *testing.T) {

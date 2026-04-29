@@ -3,7 +3,7 @@ package domain
 import "time"
 
 type Line struct {
-	ID string // MA | MB | MB1 | MC
+	ID string
 }
 
 type Station struct {
@@ -21,11 +21,11 @@ type Arrival struct {
 }
 
 type Headway struct {
-	LineID         string
-	AvgSeconds     float64
-	MinSeconds     float64
-	MaxSeconds     float64
-	SampleCount    int
+	LineID      string
+	AvgSeconds  float64
+	MinSeconds  float64
+	MaxSeconds  float64
+	SampleCount int
 }
 
 type Vehicle struct {
@@ -42,19 +42,21 @@ type Vehicle struct {
 }
 
 type NextArrival struct {
-	LineID           string
-	TripID           string
-	ArrivalTime      time.Time
-	TimeToArrival    time.Duration
-	DelaySeconds     int32
-	IsRealtime       bool
+	LineID        string
+	TripID        string
+	ArrivalTime   time.Time
+	TimeToArrival time.Duration
+	DelaySeconds  int32
+	IsRealtime    bool
 }
 
 // TripUpdate is the domain representation of a GTFS-RT TripUpdate entity.
 type TripUpdate struct {
-	TripID    string
-	RouteID   string
-	StopTimes []StopTimeUpdate
+	TripID      string
+	RouteID     string
+	ServiceType string
+	Source      string
+	StopTimes   []StopTimeUpdate
 }
 
 type StopTimeUpdate struct {
@@ -70,6 +72,8 @@ type VehiclePosition struct {
 	VehicleID      string
 	TripID         string
 	RouteID        string
+	ServiceType    string
+	Source         string
 	Latitude       float64
 	Longitude      float64
 	PositionAvail  bool

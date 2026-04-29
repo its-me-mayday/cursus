@@ -20,6 +20,8 @@ For local development with `make run`, the default port is `8080`.
 | `GET /api/v1/lines` | All lines with headway and active vehicle count |
 | `GET /api/v1/lines/{line_id}` | Line detail (`MA`, `MB`, `MB1`, `MC`) |
 | `GET /api/v1/lines/{line_id}/vehicles` | Live vehicle positions for a line |
+| `GET /api/v1/realtime/routes` | Realtime bus, tram, and regional rail routes seen in GTFS-RT |
+| `GET /api/v1/realtime/routes/{route_id}/vehicles` | Live vehicle positions for a realtime route |
 | `GET /api/v1/stations/{stop_id}` | Upcoming arrivals at a stop |
 | `GET /api/v1/stations/{stop_id}/next-arrival` | Next single arrival at a stop |
 | `GET /api/v1/metrics` | Global snapshot: vehicles, headways, feed age |
@@ -66,6 +68,10 @@ All parameters are set via environment variables. See `.env.example` for default
 | `CURSUS_METRO_ROUTE_IDS_MB` | `MEB` | Comma-separated route_ids for line MB |
 | `CURSUS_METRO_ROUTE_IDS_MB1` | `MEB1` | Comma-separated route_ids for line MB1 |
 | `CURSUS_METRO_ROUTE_IDS_MC` | `MEC` | Comma-separated route_ids for line MC |
+
+### Data sources
+
+Metro lines are treated as scheduled service from GTFS static data. The current Roma Mobilità GTFS-RT feeds are used for surface and regional realtime routes, such as bus, tram, and regional rail.
 
 ### MB1 branch detection
 

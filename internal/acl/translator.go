@@ -2,7 +2,6 @@ package acl
 
 import (
 	"log/slog"
-	"sort"
 	"time"
 
 	gtfsrt "github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs"
@@ -46,7 +45,6 @@ func (t *GTFSTranslator) TranslateTripUpdates(msg *gtfsrt.FeedMessage) []domain.
 	t.logger.Debug("translating feed message", "entities", entities, "timestamp", ts)
 
 	var out []domain.TripUpdate
-	unknownRouteCounts := map[string]int{}
 	for _, e := range msg.Entity {
 		if e == nil || e.TripUpdate == nil {
 			t.logger.Warn("skipping entity", "reason", "no trip_update", "entity_id", entityID(e))
@@ -59,11 +57,7 @@ func (t *GTFSTranslator) TranslateTripUpdates(msg *gtfsrt.FeedMessage) []domain.
 		}
 
 		routeID := stringVal(tu.Trip.RouteId)
-		lineID, ok := t.routeLineMap[routeID]
-		if !ok {
-			unknownRouteCounts[routeID]++
-			continue
-		}
+		lineID, serviceType := t.routeIdentity(routeID)
 
 		var stus []domain.StopTimeUpdate
 		for _, stu := range tu.StopTimeUpdate {
@@ -93,13 +87,14 @@ func (t *GTFSTranslator) TranslateTripUpdates(msg *gtfsrt.FeedMessage) []domain.
 
 		_ = lineID
 		out = append(out, domain.TripUpdate{
-			TripID:    stringVal(tu.Trip.TripId),
-			RouteID:   lineID,
-			StopTimes: stus,
+			TripID:      stringVal(tu.Trip.TripId),
+			RouteID:     lineID,
+			ServiceType: serviceType,
+			Source:      "realtime",
+			StopTimes:   stus,
 		})
 	}
 
-	t.logUnknownRoutes("trip_updates", unknownRouteCounts)
 	t.logger.Info("translation completed", "trip_updates", len(out), "vehicle_positions", 0)
 	return out
 }
@@ -119,7 +114,6 @@ func (t *GTFSTranslator) TranslateVehiclePositions(msg *gtfsrt.FeedMessage) []do
 	t.logger.Debug("translating feed message", "entities", entities, "timestamp", ts)
 
 	var out []domain.VehiclePosition
-	unknownRouteCounts := map[string]int{}
 	for _, e := range msg.Entity {
 		if e == nil || e.Vehicle == nil {
 			t.logger.Warn("skipping entity", "reason", "no vehicle", "entity_id", entityID(e))
@@ -132,14 +126,12 @@ func (t *GTFSTranslator) TranslateVehiclePositions(msg *gtfsrt.FeedMessage) []do
 		}
 
 		routeID := stringVal(v.Trip.RouteId)
-		lineID, ok := t.routeLineMap[routeID]
-		if !ok {
-			unknownRouteCounts[routeID]++
-			continue
-		}
+		lineID, serviceType := t.routeIdentity(routeID)
 
 		vp := domain.VehiclePosition{
 			RouteID:       lineID,
+			ServiceType:   serviceType,
+			Source:        "realtime",
 			TripID:        stringVal(v.Trip.TripId),
 			CurrentStopID: stringVal(v.StopId),
 		}
@@ -171,37 +163,15 @@ func (t *GTFSTranslator) TranslateVehiclePositions(msg *gtfsrt.FeedMessage) []do
 		out = append(out, vp)
 	}
 
-	t.logUnknownRoutes("vehicle_positions", unknownRouteCounts)
 	t.logger.Info("translation completed", "trip_updates", 0, "vehicle_positions", len(out))
 	return out
 }
 
-func (t *GTFSTranslator) logUnknownRoutes(feed string, counts map[string]int) {
-	if len(counts) == 0 {
-		return
+func (t *GTFSTranslator) routeIdentity(routeID string) (string, string) {
+	if lineID, ok := t.routeLineMap[routeID]; ok {
+		return lineID, "metro"
 	}
-
-	ids := make([]string, 0, len(counts))
-	total := 0
-	for id, count := range counts {
-		ids = append(ids, id)
-		total += count
-	}
-	sort.Strings(ids)
-
-	const maxSample = 20
-	sample := ids
-	if len(sample) > maxSample {
-		sample = sample[:maxSample]
-	}
-
-	t.logger.Warn("unknown route_ids skipped",
-		"feed", feed,
-		"unique_route_ids", len(ids),
-		"entity_count", total,
-		"sample_route_ids", sample,
-	)
-	t.logger.Debug("unknown route_ids skipped detail", "feed", feed, "route_ids", ids)
+	return routeID, "surface"
 }
 
 func entityID(e *gtfsrt.FeedEntity) string {
