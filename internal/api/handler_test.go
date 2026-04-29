@@ -11,7 +11,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/lucamaggio/cursus/internal/domain"
+	"github.com/its-me-mayday/cursus/internal/domain"
 )
 
 func testLogger() *slog.Logger {
@@ -26,9 +26,9 @@ type mockStore struct {
 	lastFetchTime    time.Time
 }
 
-func (s *mockStore) GetTripUpdates() []domain.TripUpdate       { return s.tripUpdates }
+func (s *mockStore) GetTripUpdates() []domain.TripUpdate           { return s.tripUpdates }
 func (s *mockStore) GetVehiclePositions() []domain.VehiclePosition { return s.vehiclePositions }
-func (s *mockStore) LastFetchTime() time.Time                   { return s.lastFetchTime }
+func (s *mockStore) LastFetchTime() time.Time                      { return s.lastFetchTime }
 
 func newHandler(store Store) *Handler {
 	return New(testLogger(), store)

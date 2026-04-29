@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lucamaggio/cursus/internal/domain"
-	"github.com/lucamaggio/cursus/internal/metrics"
+	"github.com/its-me-mayday/cursus/internal/domain"
+	"github.com/its-me-mayday/cursus/internal/metrics"
 )
 
 var validLines = map[string]bool{"MA": true, "MB": true, "MB1": true, "MC": true}

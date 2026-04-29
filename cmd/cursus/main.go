@@ -14,11 +14,11 @@ import (
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/lucamaggio/cursus/config"
-	"github.com/lucamaggio/cursus/internal/acl"
-	"github.com/lucamaggio/cursus/internal/api"
-	"github.com/lucamaggio/cursus/internal/poller"
-	"github.com/lucamaggio/cursus/internal/store"
+	"github.com/its-me-mayday/cursus/config"
+	"github.com/its-me-mayday/cursus/internal/acl"
+	"github.com/its-me-mayday/cursus/internal/api"
+	"github.com/its-me-mayday/cursus/internal/poller"
+	"github.com/its-me-mayday/cursus/internal/store"
 )
 
 func main() {

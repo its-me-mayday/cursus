@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lucamaggio/cursus/internal/domain"
+	"github.com/its-me-mayday/cursus/internal/domain"
 )
 
 var baseTime = time.Date(2026, 4, 29, 10, 0, 0, 0, time.UTC)

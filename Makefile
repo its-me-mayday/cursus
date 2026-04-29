@@ -7,7 +7,7 @@ build:
 	go build -o $(BINARY) $(CMD)
 
 run:
-	go run $(CMD)
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(CMD)
 
 test:
 	go test ./... -race

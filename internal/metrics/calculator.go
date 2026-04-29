@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/lucamaggio/cursus/internal/domain"
+	"github.com/its-me-mayday/cursus/internal/domain"
 )
 
 // ComputeHeadway calculates headway statistics for a set of arrivals at a station for a given line.

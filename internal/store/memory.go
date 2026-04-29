@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lucamaggio/cursus/internal/domain"
+	"github.com/its-me-mayday/cursus/internal/domain"
 )
 
 // Memory is a thread-safe in-memory store for GTFS domain data.

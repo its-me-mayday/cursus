@@ -10,22 +10,22 @@ import (
 )
 
 type Config struct {
-	Port                   string
-	LogLevel               string
-	PollInterval           time.Duration
-	GTFSTripUpdatesURL     string
+	Port                    string
+	LogLevel                string
+	PollInterval            time.Duration
+	GTFSTripUpdatesURL      string
 	GTFSVehiclePositionsURL string
-	GTFSFetchTimeout       time.Duration
-	GTFSMaxRetries         int
-	MetroRouteIDs          map[string][]string
+	GTFSFetchTimeout        time.Duration
+	GTFSMaxRetries          int
+	MetroRouteIDs           map[string][]string
 }
 
 func Load(logger *slog.Logger) (*Config, error) {
 	cfg := &Config{
-		Port:                   getenv("CURSUS_PORT", "8080"),
-		LogLevel:               getenv("CURSUS_LOG_LEVEL", "info"),
-		GTFSTripUpdatesURL:     getenv("CURSUS_GTFS_TRIP_UPDATES_URL", "https://romamobilita.it/sites/default/files/rome_rtgtfs_trip_updates.pb"),
-		GTFSVehiclePositionsURL: getenv("CURSUS_GTFS_VEHICLE_POSITIONS_URL", "https://romamobilita.it/sites/default/files/rome_rtgtfs_vehicle_positions.pb"),
+		Port:                    getenv("CURSUS_PORT", "8080"),
+		LogLevel:                getenv("CURSUS_LOG_LEVEL", "info"),
+		GTFSTripUpdatesURL:      getenv("CURSUS_GTFS_TRIP_UPDATES_URL", "https://romamobilita.it/sites/default/files/rome_rtgtfs_trip_updates_feed.pb"),
+		GTFSVehiclePositionsURL: getenv("CURSUS_GTFS_VEHICLE_POSITIONS_URL", "https://romamobilita.it/sites/default/files/rome_rtgtfs_vehicle_positions_feed.pb"),
 	}
 
 	var err error

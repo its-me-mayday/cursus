@@ -9,7 +9,8 @@ cp .env.example .env
 docker compose up
 ```
 
-The API will be available at `http://localhost:8080`.
+The API will be available at `http://localhost:8085` when started with Docker Compose.
+For local development with `make run`, the default port is `8080`.
 
 ## API
 
@@ -57,14 +58,14 @@ All parameters are set via environment variables. See `.env.example` for default
 | `CURSUS_PORT` | `8080` | HTTP listen port |
 | `CURSUS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `CURSUS_POLL_INTERVAL` | `30s` | How often to fetch feeds |
-| `CURSUS_GTFS_TRIP_UPDATES_URL` | Roma Mobilità URL | GTFS-RT TripUpdates feed |
-| `CURSUS_GTFS_VEHICLE_POSITIONS_URL` | Roma Mobilità URL | GTFS-RT VehiclePositions feed |
+| `CURSUS_GTFS_TRIP_UPDATES_URL` | Roma Mobilità `_feed.pb` URL | GTFS-RT TripUpdates feed |
+| `CURSUS_GTFS_VEHICLE_POSITIONS_URL` | Roma Mobilità `_feed.pb` URL | GTFS-RT VehiclePositions feed |
 | `CURSUS_GTFS_FETCH_TIMEOUT` | `10s` | Per-request HTTP timeout |
 | `CURSUS_GTFS_MAX_RETRIES` | `3` | Max retry attempts with exponential backoff |
-| `CURSUS_METRO_ROUTE_IDS_MA` | `MA` | Comma-separated route_ids for line MA |
-| `CURSUS_METRO_ROUTE_IDS_MB` | `MB` | Comma-separated route_ids for line MB |
-| `CURSUS_METRO_ROUTE_IDS_MB1` | `MB1` | Comma-separated route_ids for line MB1 |
-| `CURSUS_METRO_ROUTE_IDS_MC` | `MC` | Comma-separated route_ids for line MC |
+| `CURSUS_METRO_ROUTE_IDS_MA` | `MEA` | Comma-separated route_ids for line MA |
+| `CURSUS_METRO_ROUTE_IDS_MB` | `MEB` | Comma-separated route_ids for line MB |
+| `CURSUS_METRO_ROUTE_IDS_MB1` | `MEB1` | Comma-separated route_ids for line MB1 |
+| `CURSUS_METRO_ROUTE_IDS_MC` | `MEC` | Comma-separated route_ids for line MC |
 
 ### MB1 branch detection
 

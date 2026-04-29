@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -15,6 +15,6 @@ USER cursus
 WORKDIR /app
 COPY --from=builder /app/cursus .
 
-EXPOSE 8080
+EXPOSE 8085
 
 ENTRYPOINT ["./cursus"]

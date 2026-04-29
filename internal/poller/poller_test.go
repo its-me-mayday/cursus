@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lucamaggio/cursus/internal/domain"
+	"github.com/its-me-mayday/cursus/internal/domain"
 )
 
 func testLogger() *slog.Logger {

@@ -1,4 +1,4 @@
-module github.com/lucamaggio/cursus
+module github.com/its-me-mayday/cursus
 
 go 1.25.0
 
