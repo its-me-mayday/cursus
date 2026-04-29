@@ -15,6 +15,7 @@ type Config struct {
 	PollInterval            time.Duration
 	GTFSTripUpdatesURL      string
 	GTFSVehiclePositionsURL string
+	GTFSStaticURL           string
 	GTFSFetchTimeout        time.Duration
 	GTFSMaxRetries          int
 	MetroRouteIDs           map[string][]string
@@ -26,6 +27,7 @@ func Load(logger *slog.Logger) (*Config, error) {
 		LogLevel:                getenv("CURSUS_LOG_LEVEL", "info"),
 		GTFSTripUpdatesURL:      getenv("CURSUS_GTFS_TRIP_UPDATES_URL", "https://romamobilita.it/sites/default/files/rome_rtgtfs_trip_updates_feed.pb"),
 		GTFSVehiclePositionsURL: getenv("CURSUS_GTFS_VEHICLE_POSITIONS_URL", "https://romamobilita.it/sites/default/files/rome_rtgtfs_vehicle_positions_feed.pb"),
+		GTFSStaticURL:           getenv("CURSUS_GTFS_STATIC_URL", "https://romamobilita.it/wp-content/uploads/drupal/rome_static_gtfs.zip"),
 	}
 
 	var err error
@@ -54,6 +56,7 @@ func Load(logger *slog.Logger) (*Config, error) {
 	for _, rawURL := range []struct{ field, val string }{
 		{"CURSUS_GTFS_TRIP_UPDATES_URL", cfg.GTFSTripUpdatesURL},
 		{"CURSUS_GTFS_VEHICLE_POSITIONS_URL", cfg.GTFSVehiclePositionsURL},
+		{"CURSUS_GTFS_STATIC_URL", cfg.GTFSStaticURL},
 	} {
 		if err := validateURL(rawURL.val); err != nil {
 			logger.Error("configuration invalid", "field", rawURL.field, "error", err)

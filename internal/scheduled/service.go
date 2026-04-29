@@ -1,19 +1,21 @@
 package scheduled
 
 import (
-	"bytes"
 	"archive/zip"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Service struct {
+	mu        sync.RWMutex
 	staticURL string
 	now       func() time.Time
 
@@ -22,6 +24,7 @@ type Service struct {
 	stopTimes     []stopTime
 	calendar      []calendarRow
 	calendarDates []calendarDateRow
+	loaded        bool
 }
 
 type stop struct {
@@ -33,7 +36,7 @@ type trip struct {
 	ID        string
 	RouteID   string
 	ServiceID string
-	Headsign string
+	Headsign  string
 }
 
 type stopTime struct {
@@ -56,9 +59,9 @@ type calendarRow struct {
 }
 
 type calendarDateRow struct {
-	ServiceID      string
-	Date           string
-	ExceptionType  string
+	ServiceID     string
+	Date          string
+	ExceptionType string
 }
 
 var lineToRouteID = map[string]string{
@@ -77,110 +80,175 @@ func NewService(staticURL string) *Service {
 }
 
 func (s *Service) Load() error {
-	resp, err := http.Get(s.staticURL)
+	zipPath, err := downloadToTempFile(s.staticURL)
 	if err != nil {
-		return fmt.Errorf("download static gtfs: %w", err)
+		return err
 	}
-	defer resp.Body.Close()
+	defer os.Remove(zipPath)
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("download static gtfs: unexpected status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read static gtfs: %w", err)
-	}
-
-	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return fmt.Errorf("open static gtfs zip: %w", err)
 	}
+	defer zr.Close()
 
-	stopsRows, err := readZipCSV(zr, "stops.txt")
-	if err != nil {
-		return err
-	}
-
-	for _, r := range stopsRows {
-		s.stops = append(s.stops, stop{
+	var stops []stop
+	if err := readZipCSV(&zr.Reader, "stops.txt", func(r map[string]string) error {
+		stops = append(stops, stop{
 			ID:   r["stop_id"],
 			Name: r["stop_name"],
 		})
-	}
-
-	tripsRows, err := readZipCSV(zr, "trips.txt")
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	for _, r := range tripsRows {
+	metroRouteIDs := map[string]bool{}
+	for _, routeID := range lineToRouteID {
+		metroRouteIDs[routeID] = true
+	}
+	tripsByID := map[string]trip{}
+	metroServiceIDs := map[string]bool{}
+	if err := readZipCSV(&zr.Reader, "trips.txt", func(r map[string]string) error {
+		routeID := r["route_id"]
+		if !metroRouteIDs[routeID] {
+			return nil
+		}
 		t := trip{
 			ID:        r["trip_id"],
-			RouteID:   r["route_id"],
+			RouteID:   routeID,
 			ServiceID: r["service_id"],
-			Headsign: r["trip_headsign"],
+			Headsign:  r["trip_headsign"],
 		}
-		s.tripsByID[t.ID] = t
-	}
-
-	stopTimeRows, err := readZipCSV(zr, "stop_times.txt")
-	if err != nil {
+		tripsByID[t.ID] = t
+		metroServiceIDs[t.ServiceID] = true
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	for _, r := range stopTimeRows {
-		s.stopTimes = append(s.stopTimes, stopTime{
-			TripID:      r["trip_id"],
+	var stopTimes []stopTime
+	if err := readZipCSV(&zr.Reader, "stop_times.txt", func(r map[string]string) error {
+		tripID := r["trip_id"]
+		if _, ok := tripsByID[tripID]; !ok {
+			return nil
+		}
+		stopTimes = append(stopTimes, stopTime{
+			TripID:      tripID,
 			StopID:      r["stop_id"],
 			ArrivalTime: r["arrival_time"],
 		})
-	}
-
-	calendarRows, err := readZipCSV(zr, "calendar.txt")
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	for _, r := range calendarRows {
-		s.calendar = append(s.calendar, calendarRow{
+	var calendar []calendarRow
+	if err := readOptionalZipCSV(&zr.Reader, "calendar.txt", func(r map[string]string) error {
+		if !metroServiceIDs[r["service_id"]] {
+			return nil
+		}
+		calendar = append(calendar, calendarRow{
 			ServiceID: r["service_id"],
-			Monday: r["monday"],
-			Tuesday: r["tuesday"],
+			Monday:    r["monday"],
+			Tuesday:   r["tuesday"],
 			Wednesday: r["wednesday"],
-			Thursday: r["thursday"],
-			Friday: r["friday"],
-			Saturday: r["saturday"],
-			Sunday: r["sunday"],
+			Thursday:  r["thursday"],
+			Friday:    r["friday"],
+			Saturday:  r["saturday"],
+			Sunday:    r["sunday"],
 			StartDate: r["start_date"],
-			EndDate: r["end_date"],
+			EndDate:   r["end_date"],
 		})
-	}
-
-	calendarDateRows, err := readZipCSV(zr, "calendar_dates.txt")
-	if err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	for _, r := range calendarDateRows {
-		s.calendarDates = append(s.calendarDates, calendarDateRow{
+	var calendarDates []calendarDateRow
+	if err := readOptionalZipCSV(&zr.Reader, "calendar_dates.txt", func(r map[string]string) error {
+		if !metroServiceIDs[r["service_id"]] {
+			return nil
+		}
+		calendarDates = append(calendarDates, calendarDateRow{
 			ServiceID:     r["service_id"],
 			Date:          r["date"],
 			ExceptionType: r["exception_type"],
 		})
+		return nil
+	}); err != nil {
+		return err
 	}
+
+	s.mu.Lock()
+	s.stops = stops
+	s.tripsByID = tripsByID
+	s.stopTimes = stopTimes
+	s.calendar = calendar
+	s.calendarDates = calendarDates
+	s.loaded = true
+	s.mu.Unlock()
 
 	return nil
 }
 
+func downloadToTempFile(url string) (string, error) {
+	client := &http.Client{Timeout: 2 * time.Minute}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("download static gtfs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("download static gtfs: unexpected status %d", resp.StatusCode)
+	}
+
+	f, err := os.CreateTemp("", "cursus-static-gtfs-*.zip")
+	if err != nil {
+		return "", fmt.Errorf("create static gtfs temp file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write static gtfs temp file: %w", err)
+	}
+
+	return f.Name(), nil
+}
+
+// StopIDsByName returns all stop IDs whose name contains stationName (case-insensitive).
+func (s *Service) StopIDsByName(stationName string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.loaded {
+		return nil
+	}
+	q := strings.ToLower(strings.TrimSpace(stationName))
+	var ids []string
+	for _, st := range s.stops {
+		if strings.Contains(strings.ToLower(st.Name), q) {
+			ids = append(ids, st.ID)
+		}
+	}
+	return ids
+}
+
 func (s *Service) ArrivalsByStationName(stationName string, line string, limit int) (ArrivalsResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.loaded {
+		return ArrivalsResponse{}, fmt.Errorf("scheduled gtfs static is still loading")
+	}
+
 	line = strings.ToUpper(strings.TrimSpace(line))
 	routeID, ok := lineToRouteID[line]
 	if !ok {
 		return ArrivalsResponse{}, fmt.Errorf("unsupported line %q", line)
 	}
 
-	now := time.Now()
+	now := s.now()
 	today := now.Format("20060102")
 	nowSeconds := now.Hour()*3600 + now.Minute()*60 + now.Second()
 
@@ -231,12 +299,12 @@ func (s *Service) ArrivalsByStationName(stationName string, line string, limit i
 		diff := arrivalSeconds - nowSeconds
 
 		arrivals = append(arrivals, Arrival{
-			Station:             stationLabel,
-			StopID:              st.StopID,
-			Line:                line,
-			RouteID:             routeID,
-			TripID:              st.TripID,
-			Direction:           t.Headsign,
+			Station:              stationLabel,
+			StopID:               st.StopID,
+			Line:                 line,
+			RouteID:              routeID,
+			TripID:               st.TripID,
+			Direction:            t.Headsign,
 			ScheduledTime:        formatSecondsAsClock(arrivalSeconds),
 			TimeToArrivalSeconds: diff,
 			TimeToArrivalHuman:   humanMinutes(diff),
@@ -315,7 +383,23 @@ func (r calendarRow) isActiveOn(day string) bool {
 	}
 }
 
-func readZipCSV(zr *zip.Reader, name string) ([]map[string]string, error) {
+func readZipCSV(zr *zip.Reader, name string, handle func(map[string]string) error) error {
+	found, err := readZipCSVFile(zr, name, handle)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("file not found in gtfs zip: %s", name)
+	}
+	return nil
+}
+
+func readOptionalZipCSV(zr *zip.Reader, name string, handle func(map[string]string) error) error {
+	_, err := readZipCSVFile(zr, name, handle)
+	return err
+}
+
+func readZipCSVFile(zr *zip.Reader, name string, handle func(map[string]string) error) (bool, error) {
 	for _, f := range zr.File {
 		if f.Name != name {
 			continue
@@ -323,37 +407,40 @@ func readZipCSV(zr *zip.Reader, name string) ([]map[string]string, error) {
 
 		rc, err := f.Open()
 		if err != nil {
-			return nil, err
+			return true, err
 		}
 		defer rc.Close()
 
 		reader := csv.NewReader(rc)
-		rows, err := reader.ReadAll()
+		headers, err := reader.Read()
 		if err != nil {
-			return nil, err
+			if err == io.EOF {
+				return true, nil
+			}
+			return true, err
 		}
 
-		if len(rows) == 0 {
-			return nil, nil
-		}
-
-		headers := rows[0]
-		var out []map[string]string
-
-		for _, row := range rows[1:] {
+		for {
+			row, err := reader.Read()
+			if err == io.EOF {
+				return true, nil
+			}
+			if err != nil {
+				return true, err
+			}
 			item := map[string]string{}
 			for i, h := range headers {
 				if i < len(row) {
 					item[h] = row[i]
 				}
 			}
-			out = append(out, item)
+			if err := handle(item); err != nil {
+				return true, err
+			}
 		}
-
-		return out, nil
 	}
 
-	return nil, fmt.Errorf("file not found in gtfs zip: %s", name)
+	return false, nil
 }
 
 func parseGTFSTime(value string) (int, error) {

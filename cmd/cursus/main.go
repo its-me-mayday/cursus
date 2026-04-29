@@ -18,6 +18,7 @@ import (
 	"github.com/its-me-mayday/cursus/internal/acl"
 	"github.com/its-me-mayday/cursus/internal/api"
 	"github.com/its-me-mayday/cursus/internal/poller"
+	"github.com/its-me-mayday/cursus/internal/scheduled"
 	"github.com/its-me-mayday/cursus/internal/store"
 )
 
@@ -58,6 +59,19 @@ func run() error {
 	// Wiring
 	mem := store.NewMemory()
 	translator := acl.NewGTFSTranslator(logger, cfg.MetroRouteIDs)
+	scheduledService := scheduled.NewService(cfg.GTFSStaticURL)
+	go func() {
+		for {
+			logger.Info("scheduled gtfs static load started", "url", cfg.GTFSStaticURL)
+			if err := scheduledService.Load(); err != nil {
+				logger.Warn("scheduled gtfs static load failed", "error", err)
+				time.Sleep(30 * time.Second)
+				continue
+			}
+			logger.Info("scheduled gtfs static loaded")
+			time.Sleep(24 * time.Hour)
+		}
+	}()
 	httpClient := &http.Client{Timeout: cfg.GTFSFetchTimeout}
 	fetcher := acl.NewGTFSFetcher(
 		logger, httpClient, translator,
@@ -78,7 +92,7 @@ func run() error {
 	p.Start(ctx)
 
 	// HTTP server
-	apiHandler := api.New(logger, mem)
+	apiHandler := api.NewWithScheduled(logger, mem, scheduledService)
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      apiHandler,

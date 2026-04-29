@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/its-me-mayday/cursus/internal/domain"
 	"github.com/its-me-mayday/cursus/internal/metrics"
+	"github.com/its-me-mayday/cursus/internal/scheduled"
 )
 
 var validLines = map[string]bool{"MA": true, "MB": true, "MB1": true, "MC": true}
@@ -20,24 +24,37 @@ type Store interface {
 	LastFetchTime() time.Time
 }
 
+type ScheduledService interface {
+	ArrivalsByStationName(stationName string, line string, limit int) (scheduled.ArrivalsResponse, error)
+	StopIDsByName(stationName string) []string
+}
+
 // Handler bundles all HTTP handlers for the Cursus API.
 type Handler struct {
-	logger *slog.Logger
-	store  Store
-	mux    *http.ServeMux
+	logger    *slog.Logger
+	store     Store
+	scheduled ScheduledService
+	mux       *http.ServeMux
 }
 
 // New creates a Handler and registers routes.
 func New(logger *slog.Logger, store Store) *Handler {
+	return NewWithScheduled(logger, store, nil)
+}
+
+func NewWithScheduled(logger *slog.Logger, store Store, scheduledService ScheduledService) *Handler {
 	h := &Handler{
-		logger: logger.With("component", "api"),
-		store:  store,
-		mux:    http.NewServeMux(),
+		logger:    logger.With("component", "api"),
+		store:     store,
+		scheduled: scheduledService,
+		mux:       http.NewServeMux(),
 	}
 	h.mux.HandleFunc("GET /health", h.health)
 	h.mux.HandleFunc("GET /api/v1/lines", h.lines)
 	h.mux.HandleFunc("GET /api/v1/lines/{line_id}", h.lineDetail)
 	h.mux.HandleFunc("GET /api/v1/lines/{line_id}/vehicles", h.lineVehicles)
+	h.mux.HandleFunc("GET /api/v1/scheduled/metro/arrivals", h.scheduledMetroArrivals)
+	h.mux.HandleFunc("GET /api/v1/scheduled/surface-routes", h.surfaceRoutesAtStation)
 	h.mux.HandleFunc("GET /api/v1/realtime/routes", h.realtimeRoutes)
 	h.mux.HandleFunc("GET /api/v1/realtime/routes/{route_id}/vehicles", h.realtimeRouteVehicles)
 	h.mux.HandleFunc("GET /api/v1/stations/{stop_id}", h.stationArrivals)
@@ -49,6 +66,13 @@ func New(logger *slog.Logger, store Store) *Handler {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	h.logger.Info("request received", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 	h.mux.ServeHTTP(rw, r)
 	h.logger.Info("request completed",
@@ -198,6 +222,96 @@ func (h *Handler) lineVehicles(w http.ResponseWriter, r *http.Request) {
 		VehicleCount: len(vjs),
 		Vehicles:     vjs,
 		DataAgeSec:   age,
+	})
+}
+
+func (h *Handler) scheduledMetroArrivals(w http.ResponseWriter, r *http.Request) {
+	if h.scheduled == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduled service unavailable"})
+		return
+	}
+
+	station := r.URL.Query().Get("station")
+	line := r.URL.Query().Get("line")
+	if station == "" || line == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "station and line query parameters are required"})
+		return
+	}
+
+	limit := 8
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 1 || parsed > 50 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be between 1 and 50"})
+			return
+		}
+		limit = parsed
+	}
+
+	resp, err := h.scheduled.ArrivalsByStationName(station, line, limit)
+	if err != nil {
+		h.logger.Warn("scheduled arrivals unavailable", "station", station, "line", line, "error", err)
+		if strings.Contains(err.Error(), "still loading") {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type surfaceRouteAtStation struct {
+	RouteID        string `json:"route_id"`
+	ActiveVehicles int    `json:"active_vehicles"`
+}
+
+type surfaceRoutesResponse struct {
+	Station string                  `json:"station"`
+	Source  string                  `json:"source"`
+	Routes  []surfaceRouteAtStation `json:"routes"`
+}
+
+func (h *Handler) surfaceRoutesAtStation(w http.ResponseWriter, r *http.Request) {
+	if h.scheduled == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduled service unavailable"})
+		return
+	}
+	station := r.URL.Query().Get("station")
+	if station == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "station query parameter is required"})
+		return
+	}
+
+	stopIDs := h.scheduled.StopIDsByName(station)
+	if len(stopIDs) == 0 {
+		writeJSON(w, http.StatusOK, surfaceRoutesResponse{Station: station, Source: "gtfs_static+realtime", Routes: []surfaceRouteAtStation{}})
+		return
+	}
+	stopIDSet := make(map[string]bool, len(stopIDs))
+	for _, id := range stopIDs {
+		stopIDSet[id] = true
+	}
+
+	positions := h.store.GetVehiclePositions()
+	routeVehicles := map[string]int{}
+	for _, vp := range positions {
+		if vp.ServiceType == "surface" && stopIDSet[vp.CurrentStopID] {
+			routeVehicles[vp.RouteID]++
+		}
+	}
+
+	routes := make([]surfaceRouteAtStation, 0, len(routeVehicles))
+	for routeID, count := range routeVehicles {
+		routes = append(routes, surfaceRouteAtStation{RouteID: routeID, ActiveVehicles: count})
+	}
+	sort.Slice(routes, func(i, j int) bool { return routes[i].RouteID < routes[j].RouteID })
+
+	writeJSON(w, http.StatusOK, surfaceRoutesResponse{
+		Station: station,
+		Source:  "gtfs_static+realtime",
+		Routes:  routes,
 	})
 }
 

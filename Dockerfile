@@ -15,6 +15,6 @@ USER cursus
 WORKDIR /app
 COPY --from=builder /app/cursus .
 
-EXPOSE 8085
+EXPOSE 8080
 
 ENTRYPOINT ["./cursus"]
