@@ -26,6 +26,7 @@ type Store interface {
 
 type ScheduledService interface {
 	ArrivalsByStationName(stationName string, line string, limit int) (scheduled.ArrivalsResponse, error)
+	SurfaceArrivalsByStationName(stationName string, limit int) (scheduled.SurfaceArrivalsResponse, error)
 	StopIDsByName(stationName string) []string
 }
 
@@ -55,6 +56,7 @@ func NewWithScheduled(logger *slog.Logger, store Store, scheduledService Schedul
 	h.mux.HandleFunc("GET /api/v1/lines/{line_id}/vehicles", h.lineVehicles)
 	h.mux.HandleFunc("GET /api/v1/scheduled/metro/arrivals", h.scheduledMetroArrivals)
 	h.mux.HandleFunc("GET /api/v1/scheduled/surface-routes", h.surfaceRoutesAtStation)
+	h.mux.HandleFunc("GET /api/v1/scheduled/surface-arrivals", h.scheduledSurfaceArrivals)
 	h.mux.HandleFunc("GET /api/v1/realtime/routes", h.realtimeRoutes)
 	h.mux.HandleFunc("GET /api/v1/realtime/routes/{route_id}/vehicles", h.realtimeRouteVehicles)
 	h.mux.HandleFunc("GET /api/v1/stations/{stop_id}", h.stationArrivals)
@@ -259,6 +261,38 @@ func (h *Handler) scheduledMetroArrivals(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) scheduledSurfaceArrivals(w http.ResponseWriter, r *http.Request) {
+	if h.scheduled == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduled service unavailable"})
+		return
+	}
+	station := r.URL.Query().Get("station")
+	if station == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "station query parameter is required"})
+		return
+	}
+	limit := 8
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 1 || parsed > 50 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be between 1 and 50"})
+			return
+		}
+		limit = parsed
+	}
+	resp, err := h.scheduled.SurfaceArrivalsByStationName(station, limit)
+	if err != nil {
+		h.logger.Warn("surface scheduled arrivals unavailable", "station", station, "error", err)
+		if strings.Contains(err.Error(), "still loading") {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

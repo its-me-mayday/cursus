@@ -19,12 +19,14 @@ type Service struct {
 	staticURL string
 	now       func() time.Time
 
-	stops         []stop
-	tripsByID     map[string]trip
-	stopTimes     []stopTime
-	calendar      []calendarRow
-	calendarDates []calendarDateRow
-	loaded        bool
+	stops            []stop
+	tripsByID        map[string]trip
+	surfaceTripsByID map[string]trip
+	stopTimes        []stopTime
+	surfaceStopIndex map[string][]stopTime // stop_id → surface stop_times
+	calendar         []calendarRow
+	calendarDates    []calendarDateRow
+	loaded           bool
 }
 
 type stop struct {
@@ -73,9 +75,11 @@ var lineToRouteID = map[string]string{
 
 func NewService(staticURL string) *Service {
 	return &Service{
-		staticURL: staticURL,
-		now:       func() time.Time { return time.Now().In(time.FixedZone("Europe/Rome", 3600)) },
-		tripsByID: map[string]trip{},
+		staticURL:        staticURL,
+		now:              func() time.Time { return time.Now().In(time.FixedZone("Europe/Rome", 3600)) },
+		tripsByID:        map[string]trip{},
+		surfaceTripsByID: map[string]trip{},
+		surfaceStopIndex: map[string][]stopTime{},
 	}
 }
 
@@ -108,36 +112,39 @@ func (s *Service) Load() error {
 		metroRouteIDs[routeID] = true
 	}
 	tripsByID := map[string]trip{}
-	metroServiceIDs := map[string]bool{}
+	surfaceTripsByID := map[string]trip{}
 	if err := readZipCSV(&zr.Reader, "trips.txt", func(r map[string]string) error {
 		routeID := r["route_id"]
-		if !metroRouteIDs[routeID] {
-			return nil
-		}
 		t := trip{
 			ID:        r["trip_id"],
 			RouteID:   routeID,
 			ServiceID: r["service_id"],
 			Headsign:  r["trip_headsign"],
 		}
-		tripsByID[t.ID] = t
-		metroServiceIDs[t.ServiceID] = true
+		if metroRouteIDs[routeID] {
+			tripsByID[t.ID] = t
+		} else {
+			surfaceTripsByID[t.ID] = t
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
 
 	var stopTimes []stopTime
+	surfaceStopIndex := map[string][]stopTime{}
 	if err := readZipCSV(&zr.Reader, "stop_times.txt", func(r map[string]string) error {
 		tripID := r["trip_id"]
-		if _, ok := tripsByID[tripID]; !ok {
-			return nil
-		}
-		stopTimes = append(stopTimes, stopTime{
+		st := stopTime{
 			TripID:      tripID,
 			StopID:      r["stop_id"],
 			ArrivalTime: r["arrival_time"],
-		})
+		}
+		if _, ok := tripsByID[tripID]; ok {
+			stopTimes = append(stopTimes, st)
+		} else if _, ok := surfaceTripsByID[tripID]; ok {
+			surfaceStopIndex[st.StopID] = append(surfaceStopIndex[st.StopID], st)
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -145,9 +152,6 @@ func (s *Service) Load() error {
 
 	var calendar []calendarRow
 	if err := readOptionalZipCSV(&zr.Reader, "calendar.txt", func(r map[string]string) error {
-		if !metroServiceIDs[r["service_id"]] {
-			return nil
-		}
 		calendar = append(calendar, calendarRow{
 			ServiceID: r["service_id"],
 			Monday:    r["monday"],
@@ -167,9 +171,6 @@ func (s *Service) Load() error {
 
 	var calendarDates []calendarDateRow
 	if err := readOptionalZipCSV(&zr.Reader, "calendar_dates.txt", func(r map[string]string) error {
-		if !metroServiceIDs[r["service_id"]] {
-			return nil
-		}
 		calendarDates = append(calendarDates, calendarDateRow{
 			ServiceID:     r["service_id"],
 			Date:          r["date"],
@@ -183,7 +184,9 @@ func (s *Service) Load() error {
 	s.mu.Lock()
 	s.stops = stops
 	s.tripsByID = tripsByID
+	s.surfaceTripsByID = surfaceTripsByID
 	s.stopTimes = stopTimes
+	s.surfaceStopIndex = surfaceStopIndex
 	s.calendar = calendar
 	s.calendarDates = calendarDates
 	s.loaded = true
@@ -328,6 +331,68 @@ func (s *Service) ArrivalsByStationName(stationName string, line string, limit i
 		Line:     line,
 		Source:   "gtfs_static",
 		Realtime: false,
+		Arrivals: arrivals,
+	}, nil
+}
+
+func (s *Service) SurfaceArrivalsByStationName(stationName string, limit int) (SurfaceArrivalsResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.loaded {
+		return SurfaceArrivalsResponse{}, fmt.Errorf("scheduled gtfs static is still loading")
+	}
+
+	now := s.now()
+	today := now.Format("20060102")
+	nowSeconds := now.Hour()*3600 + now.Minute()*60 + now.Second()
+
+	q := strings.ToLower(strings.TrimSpace(stationName))
+	activeServices := s.activeServiceIDs(today, now.Weekday())
+
+	var arrivals []SurfaceArrival
+	for _, st := range s.stops {
+		if !strings.Contains(strings.ToLower(st.Name), q) {
+			continue
+		}
+		for _, stt := range s.surfaceStopIndex[st.ID] {
+			t, ok := s.surfaceTripsByID[stt.TripID]
+			if !ok || !activeServices[t.ServiceID] {
+				continue
+			}
+			arrivalSeconds, err := parseGTFSTime(stt.ArrivalTime)
+			if err != nil || arrivalSeconds < nowSeconds {
+				continue
+			}
+			diff := arrivalSeconds - nowSeconds
+			arrivals = append(arrivals, SurfaceArrival{
+				StopID:               stt.StopID,
+				RouteID:              t.RouteID,
+				TripID:               stt.TripID,
+				Direction:            t.Headsign,
+				ScheduledTime:        formatSecondsAsClock(arrivalSeconds),
+				TimeToArrivalSeconds: diff,
+				TimeToArrivalHuman:   humanMinutes(diff),
+			})
+		}
+	}
+
+	sort.Slice(arrivals, func(i, j int) bool {
+		return arrivals[i].TimeToArrivalSeconds < arrivals[j].TimeToArrivalSeconds
+	})
+
+	if limit <= 0 {
+		limit = 8
+	}
+	if len(arrivals) > limit {
+		arrivals = arrivals[:limit]
+	}
+	if arrivals == nil {
+		arrivals = []SurfaceArrival{}
+	}
+
+	return SurfaceArrivalsResponse{
+		Station:  stationName,
+		Source:   "gtfs_static",
 		Arrivals: arrivals,
 	}, nil
 }
