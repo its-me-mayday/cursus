@@ -44,6 +44,7 @@ type trip struct {
 type stopTime struct {
 	TripID      string
 	StopID      string
+	Sequence    int
 	ArrivalTime string
 }
 
@@ -139,14 +140,21 @@ func (s *Service) Load() error {
 	surfaceStopIndex := map[string][]stopTime{}
 	if err := readZipCSV(&zr.Reader, "stop_times.txt", func(r map[string]string) error {
 		tripID := r["trip_id"]
-		st := stopTime{
-			TripID:      tripID,
-			StopID:      r["stop_id"],
-			ArrivalTime: r["arrival_time"],
-		}
 		if _, ok := tripsByID[tripID]; ok {
+			seq, _ := strconv.Atoi(r["stop_sequence"])
+			st := stopTime{
+				TripID:      tripID,
+				StopID:      r["stop_id"],
+				Sequence:    seq,
+				ArrivalTime: r["arrival_time"],
+			}
 			stopTimes = append(stopTimes, st)
 		} else if _, ok := surfaceTripsByID[tripID]; ok {
+			st := stopTime{
+				TripID:      tripID,
+				StopID:      r["stop_id"],
+				ArrivalTime: r["arrival_time"],
+			}
 			surfaceStopIndex[st.StopID] = append(surfaceStopIndex[st.StopID], st)
 		}
 		return nil
@@ -399,6 +407,66 @@ func (s *Service) SurfaceArrivalsByStationName(stationName string, limit int) (S
 		Source:   "gtfs_static",
 		Arrivals: arrivals,
 	}, nil
+}
+
+func (s *Service) StationsByLine(line string) (StationsResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.loaded {
+		return StationsResponse{}, fmt.Errorf("scheduled gtfs static is still loading")
+	}
+
+	line = strings.ToUpper(strings.TrimSpace(line))
+	routeID, ok := lineToRouteID[line]
+	if !ok {
+		return StationsResponse{}, fmt.Errorf("unsupported line %q", line)
+	}
+
+	stopNameByID := make(map[string]string, len(s.stops))
+	for _, st := range s.stops {
+		stopNameByID[st.ID] = st.Name
+	}
+
+	// Group stop_times by trip, keep only trips for this route
+	tripStops := map[string][]stopTime{}
+	for _, st := range s.stopTimes {
+		t, ok := s.tripsByID[st.TripID]
+		if !ok || t.RouteID != routeID {
+			continue
+		}
+		tripStops[st.TripID] = append(tripStops[st.TripID], st)
+	}
+
+	// Pick the trip with the most stops (full terminus-to-terminus run)
+	var bestTrip []stopTime
+	for _, stops := range tripStops {
+		if len(stops) > len(bestTrip) {
+			bestTrip = stops
+		}
+	}
+	if len(bestTrip) == 0 {
+		return StationsResponse{}, fmt.Errorf("no stops found for line %q", line)
+	}
+
+	sort.Slice(bestTrip, func(i, j int) bool {
+		return bestTrip[i].Sequence < bestTrip[j].Sequence
+	})
+
+	seen := make(map[string]bool)
+	var stations []string
+	for _, st := range bestTrip {
+		name, ok := stopNameByID[st.StopID]
+		if !ok {
+			continue
+		}
+		key := strings.ToLower(name)
+		if !seen[key] {
+			seen[key] = true
+			stations = append(stations, name)
+		}
+	}
+
+	return StationsResponse{Line: line, Stations: stations}, nil
 }
 
 func (s *Service) activeServiceIDs(today string, weekday time.Weekday) map[string]bool {

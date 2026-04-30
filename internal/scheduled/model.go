@@ -35,3 +35,8 @@ type SurfaceArrivalsResponse struct {
 	Source   string           `json:"source"`
 	Arrivals []SurfaceArrival `json:"arrivals"`
 }
+
+type StationsResponse struct {
+	Line     string   `json:"line"`
+	Stations []string `json:"stations"`
+}

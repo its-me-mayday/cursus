@@ -28,6 +28,7 @@ type ScheduledService interface {
 	ArrivalsByStationName(stationName string, line string, limit int) (scheduled.ArrivalsResponse, error)
 	SurfaceArrivalsByStationName(stationName string, limit int) (scheduled.SurfaceArrivalsResponse, error)
 	StopIDsByName(stationName string) []string
+	StationsByLine(line string) (scheduled.StationsResponse, error)
 }
 
 // Handler bundles all HTTP handlers for the Cursus API.
@@ -55,6 +56,7 @@ func NewWithScheduled(logger *slog.Logger, store Store, scheduledService Schedul
 	h.mux.HandleFunc("GET /api/v1/lines/{line_id}", h.lineDetail)
 	h.mux.HandleFunc("GET /api/v1/lines/{line_id}/vehicles", h.lineVehicles)
 	h.mux.HandleFunc("GET /api/v1/scheduled/metro/arrivals", h.scheduledMetroArrivals)
+	h.mux.HandleFunc("GET /api/v1/scheduled/metro/stations", h.scheduledMetroStations)
 	h.mux.HandleFunc("GET /api/v1/scheduled/surface-routes", h.surfaceRoutesAtStation)
 	h.mux.HandleFunc("GET /api/v1/scheduled/surface-arrivals", h.scheduledSurfaceArrivals)
 	h.mux.HandleFunc("GET /api/v1/realtime/routes", h.realtimeRoutes)
@@ -261,6 +263,28 @@ func (h *Handler) scheduledMetroArrivals(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) scheduledMetroStations(w http.ResponseWriter, r *http.Request) {
+	if h.scheduled == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scheduled service unavailable"})
+		return
+	}
+	line := r.URL.Query().Get("line")
+	if line == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "line query parameter is required"})
+		return
+	}
+	resp, err := h.scheduled.StationsByLine(line)
+	if err != nil {
+		if strings.Contains(err.Error(), "still loading") {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
