@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	_ "time/tzdata"
 	"time"
 
 	"go.opentelemetry.io/otel"

@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o cursus ./cmd/cursus
 
 FROM alpine:3.19
 
-RUN addgroup -S cursus && adduser -S cursus -G cursus
+RUN apk add --no-cache tzdata && addgroup -S cursus && adduser -S cursus -G cursus
 USER cursus
 
 WORKDIR /app

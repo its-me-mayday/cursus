@@ -74,9 +74,13 @@ var lineToRouteID = map[string]string{
 }
 
 func NewService(staticURL string) *Service {
+	loc, err := time.LoadLocation("Europe/Rome")
+	if err != nil {
+		loc = time.FixedZone("CET", 3600)
+	}
 	return &Service{
 		staticURL:        staticURL,
-		now:              func() time.Time { return time.Now().In(time.FixedZone("Europe/Rome", 3600)) },
+		now:              func() time.Time { return time.Now().In(loc) },
 		tripsByID:        map[string]trip{},
 		surfaceTripsByID: map[string]trip{},
 		surfaceStopIndex: map[string][]stopTime{},
